@@ -95,13 +95,21 @@ export function FileTree(props: {
    *  shell owns the store; absent (standalone/test compositions) the mutation
    *  is a no-op and the tree simply refreshes. */
   onMutateExpanded?: (mutation: ExpandedMutation) => void
+  /** The file to highlight (a tab's double-click reveal); null/absent = none. */
+  revealedPath?: string | null
 }) {
   const {
     sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, refreshTick,
-    onMutateExpanded,
+    onMutateExpanded, revealedPath,
   } = props
   const [data, setData] = useState<Record<string, LevelData>>({})
   const dataRef = useRef(data)
+  /** The revealed file's row — scrolled into view once it renders (levels load
+   *  lazily, so the row may appear a tick after the reveal request). */
+  const revealedRef = useRef<HTMLDivElement | null>(null)
+  /** The path we already scrolled to: scrolling is one-shot per reveal so a
+   *  background level load never yanks the user's own scroll position. */
+  const lastScrolledPath = useRef<string | null>(null)
   /** The row whose path was just copied ("copied" label replaces its button). */
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
   /** Open context menu: the row path (and whether it is a directory) plus the cursor position. */
@@ -152,6 +160,17 @@ export function FileTree(props: {
     loadDir(root)
     for (const dir of expanded) loadDir(dir)
   }, [cwd, expanded, refreshTick, loadDir])
+
+  // Scroll the revealed file into view once its row exists. Levels load
+  // lazily, so `data` re-running this effect covers the case where the reveal
+  // lands before the parent directory has finished fetching; the one-shot
+  // guard keeps later level loads from re-scrolling the user away.
+  useEffect(() => {
+    if (revealedPath === null || revealedPath === undefined || revealedRef.current === null) return
+    if (lastScrolledPath.current === revealedPath) return
+    lastScrolledPath.current = revealedPath
+    revealedRef.current.scrollIntoView({ block: 'nearest' })
+  }, [revealedPath, data])
 
   /** Copy `text`; on success flip the row's copied label for a moment. */
   const copyPath = useCallback((text: string, path: string): void => {
@@ -495,7 +514,13 @@ export function FileTree(props: {
           role="button"
           tabIndex={0}
           draggable
-          className={clsx(css.explorerRow, entry.hidden && css.explorerHidden, entry.broken && css.explorerBroken)}
+          ref={revealedPath === entry.path ? revealedRef : undefined}
+          className={clsx(
+            css.explorerRow,
+            entry.hidden && css.explorerHidden,
+            entry.broken && css.explorerBroken,
+            revealedPath === entry.path && css.explorerRevealed,
+          )}
           style={{ paddingLeft: depth * 22 + 6 }}
           title={entry.broken ? `${entry.path} — ${t('brokenSymlink')}` : entry.path}
           onClick={() => { onOpenFile(entry.path) }}

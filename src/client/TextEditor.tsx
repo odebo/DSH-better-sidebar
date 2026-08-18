@@ -22,7 +22,7 @@ import type { RangeSet } from '@codemirror/state'
 import { Decoration, EditorView as CodeMirrorView, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { IconCheckOutline16, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
-import { api, htmlUrl } from './api.ts'
+import { api, htmlUrl, mediaUrl } from './api.ts'
 import { languageForPath } from './lang.ts'
 import { cmSurfaceTheme, CmThemeCompartment } from './cm-themes.ts'
 import { isDarkScheme, subscribeColorScheme } from './theme.ts'
@@ -31,6 +31,8 @@ import { appendToDraft } from './conversation-draft.ts'
 import { buildSelectionInsert, linesOfSelection } from './selection-payload.ts'
 import { lazyChunkComponent } from './lazy-chunk.tsx'
 import { splitMermaidBlocks, type MermaidMarkdownProps } from './mermaid-blocks.ts'
+import { rewriteMarkdownImages } from './markdown-images.ts'
+import { imageExtForType, imageFileFromClipboard, pastedImageTarget } from './paste-image.ts'
 import { t } from './locales.ts'
 import type { EditorToolbarState, FileViewerProps } from './service.ts'
 import css from './sidebar.module.css'
@@ -62,6 +64,9 @@ type AiState =
 
 /** Highlight mark for freshly inserted AI text (cleared on confirm/revoke). */
 const aiHighlightMark = Decoration.mark({ class: css.aiHighlight })
+
+/** Quiet period (ms) before a markdown edit is auto-saved. */
+const AUTO_SAVE_DELAY_MS = 1000
 
 /** StateEffect carrying the highlight range (null clears it). */
 const setAiHighlight = StateEffect.define<{ from: number; to: number } | null>()
@@ -112,6 +117,10 @@ export function TextEditor(props: FileViewerProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<CodeMirrorView | null>(null)
   const savingRef = useRef(false)
+  /** Set while a write is in flight and another save was requested meanwhile. */
+  const pendingSaveRef = useRef(false)
+  /** Debounce timer for markdown auto-save (null while no save is pending). */
+  const autoSaveTimerRef = useRef<number | null>(null)
   /** The theme compartment of the current view (reconfigured on scheme flip). */
   const themeCompRef = useRef<CmThemeCompartment | null>(null)
   /** The app's resolved color scheme; the editor re-themes in place on flips. */
@@ -128,6 +137,9 @@ export function TextEditor(props: FileViewerProps) {
   const aiRef = useRef<AiState>({ kind: 'idle' })
   /** Abort controller for the in-flight generation (the stop button). */
   const aiAbortRef = useRef<AbortController | null>(null)
+  /** Transient image-paste failure message (auto-clears after a few seconds). */
+  const [pasteError, setPasteError] = useState<string | null>(null)
+  const pasteErrorTimerRef = useRef<number | null>(null)
   /** The instruction typed in the selection popup's input (mirrored for click-time reads). */
   const [aiInstruction, setAiInstruction] = useState('')
   const aiInstructionRef = useRef('')
@@ -267,6 +279,10 @@ export function TextEditor(props: FileViewerProps) {
 
   // A new file (tab switch) starts clean: fresh preview mode, no draft.
   useEffect(() => {
+    if (autoSaveTimerRef.current !== null) {
+      clearTimeout(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = null
+    }
     setMode('preview')
     setDraft(null)
     setDirty(false)
@@ -276,6 +292,11 @@ export function TextEditor(props: FileViewerProps) {
     aiAbortRef.current = null
     setAi({ kind: 'idle' })
   }, [content])
+
+  // Cancel any pending auto-save on unmount (tab closed).
+  useEffect(() => () => {
+    if (autoSaveTimerRef.current !== null) clearTimeout(autoSaveTimerRef.current)
+  }, [])
 
   // Create the CodeMirror editor once the content is loaded. The view owns
   // the document; React only tracks dirty/draft state through the update
@@ -345,6 +366,8 @@ export function TextEditor(props: FileViewerProps) {
           if (update.docChanged) {
             setDraft(update.state.doc.toString())
             setDirty(true)
+            setSaveState('idle')
+            scheduleAutoSave()
           }
         }),
         keymap.of([
@@ -389,6 +412,20 @@ export function TextEditor(props: FileViewerProps) {
             mouseup: (_event, view) => { popupFromSelection(view) },
           }),
         ] : []),
+        // Image paste (markdown edit mode): an image on the clipboard is
+        // uploaded and a relative `![](...)` reference inserted at the cursor.
+        // Returning true stops the built-in paste handler, so a text paste
+        // falls through to CodeMirror's own insertion instead.
+        ...(viewerId === 'markdown' ? [
+          CodeMirrorView.domEventHandlers({
+            paste: (event, view) => {
+              const file = imageFileFromClipboard(event.clipboardData)
+              if (file === null) return false
+              void pasteImage(file, view)
+              return true
+            },
+          }),
+        ] : []),
       ],
     })
     const view = new CodeMirrorView({ state, parent: host })
@@ -422,24 +459,82 @@ export function TextEditor(props: FileViewerProps) {
 
   const save = (): void => {
     const view = viewRef.current
-    if (view === null || savingRef.current) return
+    if (view === null) return
+    if (savingRef.current) {
+      // A write is in flight; record that the newest content still needs
+      // saving — it is picked up as soon as the current write settles.
+      pendingSaveRef.current = true
+      return
+    }
+    const text = view.state.doc.toString()
     savingRef.current = true
     setSaveState('saving')
-    api.fsWrite(scope, path, view.state.doc.toString()).then(() => {
+    api.fsWrite(scope, path, text).then(() => {
       savingRef.current = false
-      setDraft(null)
-      setDirty(false)
+      if (pendingSaveRef.current) {
+        pendingSaveRef.current = false
+        save()
+        return
+      }
+      props.onSavedContent?.(text)
       setSaveState('saved')
+      // Only mark clean if nothing changed while the write was in flight.
+      if (viewRef.current?.state.doc.toString() === text) setDirty(false)
     }).catch(() => {
       savingRef.current = false
+      pendingSaveRef.current = false
       setSaveState('failed')
     })
+  }
+
+  /** Debounce-and-save for markdown edits: after a quiet spell, persist the
+   *  current doc. Skipped for partial (truncated) loads and non-markdown
+   *  viewers — those keep manual Ctrl/Cmd+S. */
+  const scheduleAutoSave = (): void => {
+    if (viewerId !== 'markdown' || truncated === true) return
+    if (autoSaveTimerRef.current !== null) clearTimeout(autoSaveTimerRef.current)
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = null
+      save()
+    }, AUTO_SAVE_DELAY_MS)
+  }
+
+  /** Paste an image from the clipboard into the markdown document: upload the
+   *  bytes into `assets/` next to the file and insert the relative `![](...)`
+   *  reference at the cursor. Failures surface as a transient banner. */
+  const pasteImage = async (file: File, view: CodeMirrorView): Promise<void> => {
+    const ext = imageExtForType(file.type)
+    const { relativePath, absolutePath } = pastedImageTarget(path, ext, new Date())
+    try {
+      await api.uploadFile(scope, absolutePath, file)
+      view.dispatch({
+        changes: { from: view.state.selection.main.head, insert: `![image](${relativePath})` },
+      })
+      setPasteError(null)
+    } catch (error) {
+      if (pasteErrorTimerRef.current !== null) clearTimeout(pasteErrorTimerRef.current)
+      setPasteError(t('pasteImageFailed', { message: error instanceof Error ? error.message : String(error) }))
+      pasteErrorTimerRef.current = window.setTimeout(() => {
+        setPasteError(null)
+        pasteErrorTimerRef.current = null
+      }, 6000)
+    }
   }
 
   const markdown = viewerId === 'markdown'
   const html = viewerId === 'html'
   /** The markdown source the preview renders (draft wins over saved content). */
   const mdText = draft ?? content ?? ''
+  /** The preview's render text: local image destinations resolve against the
+   *  document's directory and become absolute media-route URLs (the DSH
+   *  MarkdownText renderer only accepts http(s) image URLs, so relative
+   *  paths would otherwise fall back to alt text). */
+  const previewText = useMemo(
+    () => (markdown && mode === 'preview'
+      ? rewriteMarkdownImages(mdText, path, (absolute) => window.location.origin + mediaUrl(scope, absolute))
+      : mdText),
+    [markdown, mode, mdText, path, scope],
+  )
   /** md/mermaid block split for the preview (mermaid fences lift out). Split
    *  only in preview mode: edit-mode keystrokes must not re-scan the source. */
   const mdBlocks = useMemo(
@@ -570,6 +665,7 @@ export function TextEditor(props: FileViewerProps) {
       {editable && (
         <>
           {truncated === true && mode === 'edit' && <div className={css.editorBanner}>{t('truncation')}</div>}
+          {pasteError !== null && <div className={css.editorError}>{pasteError}</div>}
           <div
             className={clsx(css.editorCm, (markdown || html) && mode === 'preview' && css.editorCmHidden)}
             ref={hostRef}
@@ -582,6 +678,15 @@ export function TextEditor(props: FileViewerProps) {
           ref={mdRef}
           onMouseUp={handlePreviewMouseUp}
           onScroll={hidePopup}
+          onDoubleClick={() => {
+            // Double-click anywhere in the preview flips to edit mode (the
+            // mounted-but-hidden CodeMirror keeps the cursor/draft alive).
+            // The second mouseup of the double-click may have selected a word
+            // and anchored the selection popup — dismiss it so it never lingers
+            // over the editor.
+            hidePopup()
+            setMode('edit')
+          }}
         >
           {/* The fence copy-button labels must come from this plugin's own
               dictionary: the DSH MarkdownText/CodeBlock are cordis-free and
@@ -592,8 +697,8 @@ export function TextEditor(props: FileViewerProps) {
               parse; cross-fence references/footnotes stay intact); files
               without one render exactly as before. */}
           {hasMermaid
-            ? <LazyMermaidMarkdown text={mdText} codeLabels={codeLabels} />
-            : <MarkdownText text={mdText} codeLabels={codeLabels} />}
+            ? <LazyMermaidMarkdown text={previewText} codeLabels={codeLabels} />
+            : <MarkdownText text={previewText} codeLabels={codeLabels} />}
         </div>
       )}
       {html && mode === 'preview' && (

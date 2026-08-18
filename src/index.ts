@@ -168,6 +168,21 @@ async function readText(path: string, readLimit: number): Promise<{
   }
 }
 
+/** Read a raw request body up to `limit` bytes (bounded against unbounded reads). */
+async function readBodyBounded(req: SidebarHttpRequest, limit: number): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let total = 0
+  for await (const chunk of req) {
+    const buffer = Buffer.from(chunk)
+    total += buffer.length
+    if (total > limit) {
+      throw new SidebarError('bad-request', 'request body too large', 413)
+    }
+    chunks.push(buffer)
+  }
+  return Buffer.concat(chunks)
+}
+
 /** One API method dispatch table entry (the optional signal is the client's
  *  disconnect signal, forwarded to abortable work like the AI stream). */
 type ApiMethod = (payload: unknown, signal?: AbortSignal) => Promise<unknown> | unknown
@@ -754,6 +769,36 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
       if (!fence(req)) {
         res.writeHead(403)
         res.end('forbidden')
+        return
+      }
+      // POST writes raw bytes to one path (the markdown editor's image paste):
+      // the body is the file content, the target path travels in the query so
+      // the request stays a single binary stream (no base64/JSON inflation).
+      if (req.method === 'POST') {
+        try {
+          const url = new URL(req.url ?? '/', 'http://dsh.internal')
+          const sessionId = url.searchParams.get('sessionId')
+          const raw = url.searchParams.get('path')
+          if (sessionId === null || raw === null) throw new SidebarError('bad-request', 'sessionId and path are required')
+          const cwd = sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
+          const path = requireAbsolute(raw)
+          if (!isWithin(cwd, path)) {
+            throw new SidebarError('fs-error', 'path outside the session working directory', 403)
+          }
+          const body = await readBodyBounded(req, resolved.mediaLimit)
+          const tmp = `${path}.dsh-sidebar-tmp-${process.pid}`
+          try {
+            await mkdir(dirname(path), { recursive: true })
+            await writeFile(tmp, body)
+            await rename(tmp, path)
+          } catch (error) {
+            await rm(tmp, { force: true }).catch(() => {})
+            throw new SidebarError('fs-error', `cannot write "${path}": ${error instanceof Error ? error.message : String(error)}`, 400)
+          }
+          writeJson(res, 200, { ok: true, path })
+        } catch (error) {
+          writeError(res, error)
+        }
         return
       }
       if (req.method !== 'GET') {

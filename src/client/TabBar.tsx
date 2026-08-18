@@ -56,6 +56,8 @@ export function TabBar(props: {
   tabs: SidebarTab[]
   active: string | null
   onActivate: (tabId: string) => void
+  /** Double-click a tab → reveal its file in the explorer tree. */
+  onReveal?: (tabId: string) => void
   onClose: (tabId: string) => void
   onNewTab: (optionId: string) => void
   newTabOptions: NewTabOption[]
@@ -68,7 +70,7 @@ export function TabBar(props: {
   getTabBadge?: (tab: SidebarTab) => ReactNode
 }) {
   const {
-    paneId, tabs, active, onActivate, onClose, onNewTab, newTabOptions, onDropTab, getTabIcon, getTabBadge,
+    paneId, tabs, active, onActivate, onReveal, onClose, onNewTab, newTabOptions, onDropTab, getTabIcon, getTabBadge,
   } = props
   const [menuOpen, setMenuOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -183,6 +185,7 @@ export function TabBar(props: {
               if (payload !== null) onDropTab(payload, tab.id)
             }}
             onClick={() => { onActivate(tab.id) }}
+            onDoubleClick={() => { onReveal?.(tab.id) }}
             onMouseDown={(event) => {
               // Middle-click close: record the press target and disarm
               // Chrome's middle-click autoscroll (its indicator is inert
@@ -206,6 +209,7 @@ export function TabBar(props: {
                 event.stopPropagation()
                 onClose(tab.id)
               }}
+              onDoubleClick={(event) => { event.stopPropagation() }}
             >
               <IconCloseFill14 />
             </button>
