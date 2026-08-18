@@ -11,6 +11,7 @@
  */
 import { SIDEBAR_PREFS_DEFAULTS, type SidebarPrefs } from '../prefs-shared.ts'
 import { isNarrowWidth } from './breakpoints.ts'
+import { parentOf } from './paths.ts'
 
 /**
  * Tab type identifier. Builtins register their ids (editor / git / terminal
@@ -685,6 +686,50 @@ export function applyExpandedMutation(state: SidebarState, mutation: ExpandedMut
   return mutation.type === 'rename'
     ? renameExpanded(state, mutation.oldPath, mutation.newPath)
     : pruneExpanded(state, mutation.path)
+}
+
+/** The ancestor directory chain between `cwd` and a file's parent (inclusive),
+ *  outermost first — exactly the directories that must be expanded for the
+ *  file row to be visible. Empty when the file sits directly under `cwd`
+ *  (the root row always renders) or outside it. */
+export function ancestorsOf(path: string, cwd: string): string[] {
+  const base = cwd.replace(/[\\/]+$/, '')
+  const norm = (value: string): string => value.replace(/\\/g, '/')
+  const nBase = norm(base)
+  const nPath = norm(path)
+  if (!nPath.toLowerCase().startsWith(`${nBase.toLowerCase()}/`)) return []
+  const ancestors: string[] = []
+  let current = nPath
+  for (;;) {
+    const parent = parentOf(current)
+    if (parent === current) break
+    current = parent
+    if (current.length <= nBase.length || !current.toLowerCase().startsWith(`${nBase.toLowerCase()}/`)) break
+    ancestors.push(current)
+  }
+  ancestors.reverse()
+  return ancestors
+}
+
+/** Reveal one open tab's file in the explorer: expand its ancestor chain, open
+ *  the tab's tree dock, and stamp the revealed path (the tree highlights it).
+ *  A tab without a path (git/terminal/browser) is a no-op. */
+export function revealTabInTree(state: SidebarState, tabId: string, cwd: string): SidebarState {
+  let tab: SidebarTab | undefined
+  for (const leaf of allLeaves(state.splits).concat(allLeaves(state.bottomSplits))) {
+    const found = leaf.tabs.find(candidate => candidate.id === tabId)
+    if (found !== undefined) { tab = found; break }
+  }
+  if (tab === undefined || tab.path === undefined || tab.path === '') return state
+  const path = tab.path
+  const expanded = state.expanded.slice()
+  for (const dir of ancestorsOf(path, cwd)) {
+    if (!expanded.includes(dir)) expanded.push(dir)
+  }
+  const meta = tab.meta !== null && typeof tab.meta === 'object' && !Array.isArray(tab.meta)
+    ? tab.meta as Record<string, unknown>
+    : {}
+  return patchTab({ ...state, expanded }, tabId, { meta: { ...meta, treeOpen: true, revealedPath: path } })
 }
 
 /** Adjust one split divider: `i` is the left/top child index, delta in fractions. */

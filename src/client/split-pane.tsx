@@ -21,6 +21,8 @@ import css from './sidebar.module.css'
 export interface WorkbenchActions {
   closeTab: (paneId: string, tabId: string) => void
   activateTab: (paneId: string, tabId: string) => void
+  /** Double-click a tab → reveal its file in the explorer tree. */
+  revealTab: (tabId: string) => void
   /** Make a pane the target of newly opened tabs (click focus). */
   focusPane: (paneId: string) => void
   /** VSCode drag gesture: edge → split the target pane, center → merge. */
@@ -175,6 +177,7 @@ function LeafView(props: {
         tabs={leaf.tabs}
         active={leaf.active}
         onActivate={(tabId) => { actions.activateTab(leaf.id, tabId) }}
+        onReveal={(tabId) => { actions.revealTab(tabId) }}
         onClose={(tabId) => { actions.closeTab(leaf.id, tabId) }}
         onNewTab={onNewTab}
         newTabOptions={newTabOptions}

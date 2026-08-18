@@ -6,8 +6,10 @@
  * portalled selection / AI popups are the exception — they carry the DSH
  * lv3 shadow to read against editor text), the
  * sidebar fill surface, hairline borders, and the 28/36px circular icon
- * controls with hover fills. No static palette values, no color literals, no
- * theme selectors — light/dark adaptation is the theme package's job.
+ * controls with hover fills. The two portalled popups are the sole
+ * fixed-white exceptions (static bluish tokens + dark text) for high contrast
+ * on every theme; everything else keeps light/dark adaptation to the theme
+ * package.
  */
 
 /* ── Shell ─────────────────────────────────────────────────────────────── */
@@ -713,6 +715,15 @@
    here" indicator without flipping the label ink. */
 .explorerDropTarget,
 .explorerDropTarget:hover {
+  background: var(--dsw-alias-interactive-bg-active);
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary);
+}
+
+/* The file revealed by a tab double-click: a persistent active-surface fill +
+   brand ring so the located row reads at a glance (the same "selected" fill
+   the native row list uses). */
+.explorerRevealed,
+.explorerRevealed:hover {
   background: var(--dsw-alias-interactive-bg-active);
   box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary);
 }
@@ -1475,10 +1486,11 @@
 
 /* The floating selection actions anchored above a text selection in the
    preview/code viewers. Portalled to document.body and position:fixed, so
-   the editor's overflow clips cannot crop it; hairline border + layer-2
-   fill like the rest of the sidebar, but with the DSH lv3 shadow so the
-   floating chrome reads clearly against the editor text. The group holds
-   "add to conversation" plus (edit mode only) the AI buttons. */
+   the editor's overflow clips cannot crop it. Deliberately fixed to a white
+   surface + dark text (static bluish tokens) so the floating chrome reads
+   with high contrast on both light and dark editor themes, with the DSH lv3
+   shadow for separation. The group holds "add to conversation" plus (edit
+   mode only) the AI instruction input. */
 .selectionPopupGroup {
   position: fixed;
   z-index: 60;
@@ -1486,11 +1498,11 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  height: 28px;
+  height: 30px;
   padding: 2px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 6px;
-  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: var(--dsw-static-neutral-bluish-00);
   box-shadow: var(--dsw-shadow-lv3);
   white-space: nowrap;
 }
@@ -1498,48 +1510,48 @@
 .selectionPopupBtn {
   display: inline-flex;
   align-items: center;
-  height: 22px;
-  padding: 0 8px;
+  height: 24px;
+  padding: 0 10px;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: var(--dsw-font-xxxs-strong-11);
+  color: var(--dsw-static-neutral-bluish-1000);
+  font: var(--dsw-font-xs-strong-13);
   cursor: pointer;
 }
 
 .selectionPopupBtn:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 /* The instruction input in the selection popup: a quiet inline field whose
-   placeholder (label-tertiary) hints the supported instructions. */
+   placeholder hints the supported instructions. */
 .selectionPopupInput {
-  height: 22px;
-  min-width: 132px;
+  height: 24px;
+  min-width: 148px;
   padding: 0 8px;
   border: none;
-  border-radius: 4px;
+  border-radius: 5px;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: var(--dsw-font-xxxs-strong-11);
+  color: var(--dsw-static-neutral-bluish-1000);
+  font: var(--dsw-font-xs-strong-13);
   outline: none;
 }
 
 .selectionPopupInput::placeholder {
-  color: var(--dsw-alias-label-tertiary);
+  color: rgba(0, 0, 0, 0.4);
 }
 
 .selectionPopupInput:focus {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 /* The hairline gap between the AI-edit cluster and "add to conversation". */
 .selectionPopupDivider {
   width: 1px;
-  height: 16px;
+  height: 18px;
   margin: 0 2px;
-  background: var(--dsw-alias-border-l1);
+  background: rgba(0, 0, 0, 0.08);
 }
 
 /* The AI writing popup (loading / undo-confirm / error), anchored where the
@@ -1552,13 +1564,13 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 32px;
-  padding: 4px 8px;
-  border: 1px solid var(--dsw-alias-border-l1);
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-2);
+  background: var(--dsw-static-neutral-bluish-00);
   box-shadow: var(--dsw-shadow-lv3);
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-static-neutral-bluish-1000);
   font: var(--dsw-font-xs-13);
   white-space: nowrap;
 }
@@ -1566,25 +1578,25 @@
 .aiBtn {
   display: inline-flex;
   align-items: center;
-  height: 22px;
-  padding: 0 10px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 4px;
+  height: 24px;
+  padding: 0 12px;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 5px;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: var(--dsw-font-xxxs-strong-11);
+  color: var(--dsw-static-neutral-bluish-1000);
+  font: var(--dsw-font-xs-strong-13);
   cursor: pointer;
 }
 
 .aiBtn:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .aiSpinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--dsw-alias-border-l2);
-  border-top-color: var(--dsw-alias-brand-primary);
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  border-top-color: var(--dsw-alias-state-business-primary);
   border-radius: 50%;
   animation: aiSpin 0.8s linear infinite;
 }

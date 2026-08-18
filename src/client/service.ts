@@ -276,6 +276,10 @@ export interface FileViewerProps {
   /** Internal: the viewer registers its toolbar commands on mount (null on
    *  unmount). */
   onToolbarControls?: (controls: EditorToolbarControls | null) => void
+  /** Internal: the viewer reports the content its last save wrote, so the
+   *  editor host can reconcile its external-change baseline (kept out of
+   *  EditorToolbarState — content is too large to stringify on every render). */
+  onSavedContent?: (content: string) => void
 }
 
 /** The toolbar state a text editor reports to the host's merged-mode header. */

@@ -33,7 +33,7 @@ import type { Context, SidebarSessionList } from '../context-types.ts'
 import { appendToDraft } from './conversation-draft.ts'
 import {
   BOTTOM_MIN, PANEL_MIN, agentUuidOf, applyExpandedMutation, firstLeaf, isAgentTabId, leafWithTab, migrateBottomTabs, moveTab, moveTabToEdge, openDiffTab,
-  reconcileAgentTerminals,
+  reconcileAgentTerminals, revealTabInTree,
   resizeSplitIn, setBottomHeight, setWidth, toggleBottomPanel, toggleExpanded, togglePanel,
   type DropZone, type ExpandedMutation, type SidebarState, type SidebarStore, type SidebarTab, type SplitNode,
 } from './state.ts'
@@ -605,6 +605,10 @@ export function Sidebar(props: { ctx: Context; store: SidebarStore }) {
       // tree, sets the active pane) and fires descriptor.onActivate; the
       // session scope (with its cwd) rides to the callback.
       ctx.betterSidebar?.activateTab(tabId, sessionId === undefined ? undefined : { sessionId, cwd })
+    },
+    revealTab: (tabId) => {
+      if (cwd === undefined) return
+      store.reduce(s => revealTabInTree(s, tabId, cwd))
     },
     focusPane: (paneId) => { store.reduce(s => ({ ...s, activePane: paneId })) },
     moveTabToEdge: (payload: TabDragPayload, toPane: string, zone: DropZone) => {

@@ -30,11 +30,13 @@ export function TreePanel(props: {
   onReferenceFile: (path: string) => void
   /** Explorer expansion rewrite after a rename/delete (passed through). */
   onMutateExpanded?: (mutation: ExpandedMutation) => void
+  /** The file to highlight (a tab's double-click reveal). */
+  revealedPath?: string | null
   /** Full-window presentation: the panel fills its host instead of docking
    *  at a fixed width. */
   full?: boolean
 }) {
-  const { sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, onMutateExpanded, full } = props
+  const { sessionId, cwd, expanded, onToggle, onOpenFile, onOpenFileNewTab, onOpenFileSide, onReferenceFile, onMutateExpanded, revealedPath, full } = props
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<{ matches: string[]; truncated: boolean } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -95,6 +97,7 @@ export function TreePanel(props: {
           onOpenFileSide={onOpenFileSide}
           onReferenceFile={onReferenceFile}
           onMutateExpanded={onMutateExpanded}
+          revealedPath={revealedPath}
           refreshTick={refreshTick}
         />
       ) : (

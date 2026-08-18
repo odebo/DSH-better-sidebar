@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
-  activateTab, allLeaves, applyExpandedMutation, BOTTOM_DEFAULT, BOTTOM_MIN, closeTab, createSidebarStore,
+  activateTab, allLeaves, ancestorsOf, applyExpandedMutation, BOTTOM_DEFAULT, BOTTOM_MIN, closeTab, createSidebarStore,
   insertLeafAt, makeDefaultState, migrateBottomTabs, moveTab, moveTabToEdge, openDiffTab,
-  openTabInActivePane, patchTab, pruneExpanded, renameExpanded, resizeSplit, resizeSplitIn, sanitizeState, setBottomHeight,
+  openTabInActivePane, patchTab, pruneExpanded, renameExpanded, revealTabInTree, resizeSplit, resizeSplitIn, sanitizeState, setBottomHeight,
   splitPane, tabOpenIn, toggleBottomPanel, toggleExpanded, togglePanel,
   type SidebarState, type SidebarTab, type SplitNode,
 } from '../src/client/state.ts'
@@ -324,6 +324,32 @@ describe('sidebar state', () => {
     const s = { ...state(), expanded: ['/p/a', '/p/a/x', '/p/b'] }
     expect(applyExpandedMutation(s, { type: 'prune', path: '/p/a' }).expanded).toEqual(['/p/b'])
     expect(applyExpandedMutation(s, { type: 'rename', oldPath: '/p/a', newPath: '/p/c' }).expanded).toEqual(['/p/c', '/p/c/x', '/p/b'])
+  })
+
+  it('ancestorsOf returns the directory chain between cwd and a file (outermost first)', () => {
+    expect(ancestorsOf('/root/#Writer/改造分享/文章.md', '/root')).toEqual(['/root/#Writer', '/root/#Writer/改造分享'])
+    // A file directly under cwd has no ancestors to expand.
+    expect(ancestorsOf('/root/README.md', '/root')).toEqual([])
+    // A file outside cwd (or equal to cwd) is not revealable.
+    expect(ancestorsOf('/elsewhere/a.md', '/root')).toEqual([])
+    expect(ancestorsOf('/root', '/root')).toEqual([])
+    // Separator- and case-tolerant (Windows-ish cwd).
+    expect(ancestorsOf('C:/repo/src/lib/a.ts', 'c:/repo')).toEqual(['C:/repo/src', 'C:/repo/src/lib'])
+  })
+
+  it('revealTabInTree expands ancestors, opens the tree dock, and stamps the revealed path', () => {
+    const s = { ...state(), expanded: ['/root/#Writer'] }
+    const tabId = (s.splits as { tabs: SidebarTab[] }).tabs[0]!.id
+    const tab: SidebarTab = { id: tabId, type: 'editor', title: '文章.md', path: '/root/#Writer/改造分享/文章.md', meta: { treeOpen: false } }
+    let next = { ...s, splits: { ...(s.splits as object), tabs: [tab], active: tabId } } as SidebarState
+    next = revealTabInTree(next, tabId, '/root')
+    expect(next.expanded).toEqual(['/root/#Writer', '/root/#Writer/改造分享'])
+    const revealed = (next.splits as { tabs: SidebarTab[] }).tabs[0]!.meta as Record<string, unknown>
+    expect(revealed).toEqual({ treeOpen: true, revealedPath: '/root/#Writer/改造分享/文章.md' })
+    // A path-less tab is a no-op (identity).
+    const gitTab: SidebarTab = { id: 'git', type: 'git', title: 'Git' }
+    const s2 = { ...s, splits: { ...(s.splits as object), tabs: [gitTab], active: 'git' } } as SidebarState
+    expect(revealTabInTree(s2, 'git', '/root')).toBe(s2)
   })
 
   it('patchTab updates the title and path of one open tab (browser persistence)', () => {

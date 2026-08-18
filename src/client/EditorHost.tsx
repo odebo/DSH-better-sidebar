@@ -74,6 +74,16 @@ function treeWidthOf(tab: SidebarTab): number {
     : TREE_WIDTH_DEFAULT
 }
 
+/** Read the persisted reveal target (a tab double-click): the file path the
+ *  tree highlights, or null when none was requested. The reveal only sticks
+ *  while it still matches the tab's CURRENT path — an in-place switch to a
+ *  different file clears the stale highlight. */
+function revealedPathOf(tab: SidebarTab): string | null {
+  const path = tab.path
+  if (path === undefined || path === '') return null
+  return metaOf(tab).revealedPath === path ? path : null
+}
+
 /** Merge a patch into the tab's persisted meta (rides the layout). */
 function patchMeta(ctx: Context, tab: SidebarTab, patch: Record<string, unknown>): void {
   ctx.betterSidebar?.updateTab(tab.id, { meta: { ...metaOf(tab), ...patch } })
@@ -98,6 +108,11 @@ export function EditorHost(props: {
   const path = tab.path ?? ''
   const title = tab.title
   const [load, setLoad] = useState<EditorLoad>({ status: 'loading' })
+  /** The text content last known to be on disk — the external-change poll
+   *  compares against it (saves reconcile it via the toolbar's savedContent). */
+  const baselineRef = useRef<string | null>(null)
+  /** Bumped to force a re-fetch when an external disk change is detected. */
+  const [reloadKey, setReloadKey] = useState(0)
 
   // Reactive prefs read: flipping editorExplorer re-renders this tab with no
   // reload. The snapshot is the bare boolean so unrelated store churn never
@@ -157,6 +172,11 @@ export function EditorHost(props: {
   const controlsRef = useRef<EditorToolbarControls | null>(null)
   const onToolbarState = useCallback((next: EditorToolbarState) => {
     setToolbar(prev => prev !== null && JSON.stringify(prev) === JSON.stringify(next) ? prev : next)
+  }, [])
+  // A successful save re-syncs the disk baseline, so the poll never mistakes
+  // the editor's own write for an external change.
+  const onSavedContent = useCallback((content: string) => {
+    baselineRef.current = content
   }, [])
   const onToolbarControls = useCallback((controls: EditorToolbarControls | null) => {
     controlsRef.current = controls
@@ -231,6 +251,7 @@ export function EditorHost(props: {
         case 'fetchFsRead':
           api.fsRead(scope, path).then((result) => {
             if (cancelled) return
+            if (result.kind === 'text') baselineRef.current = result.content
             // Binary reads carry the head bytes for the detect re-match.
             const outcome = planFsReadOutcome(action.viewer, {
               binary: result.kind === 'binary',
@@ -248,7 +269,26 @@ export function EditorHost(props: {
     }
     apply(planFirstMatch(ctx.betterSidebar?.matchFileViewer(path), mediaUrlOf))
     return () => { cancelled = true; controller.abort() }
-  }, [scope.sessionId, scope.cwd, path, ctx, showEmpty])
+  }, [scope.sessionId, scope.cwd, path, ctx, showEmpty, reloadKey])
+
+  // External-change auto-reload: poll the file on disk and re-fetch when its
+  // content drifts from what the editor holds — but only while the editor has
+  // no unsaved changes (never clobber a draft). Saves reconcile the baseline
+  // through onToolbarState, so the editor's own writes never trigger a reload.
+  const readyViewer = load.status === 'ready' ? load.viewer : null
+  useEffect(() => {
+    if (showEmpty || readyViewer === null || readyViewer.fetchStrategy !== 'fsRead') return
+    const id = window.setInterval(() => {
+      if (toolbar?.dirty === true) return
+      api.fsRead(scope, path).then((result) => {
+        if (result.kind !== 'text') return
+        if (result.content === baselineRef.current) return
+        baselineRef.current = result.content
+        setReloadKey(key => key + 1)
+      }).catch(() => { /* transient read failure — retry next tick */ })
+    }, 3000)
+    return () => window.clearInterval(id)
+  }, [showEmpty, readyViewer, toolbar?.dirty, scope.sessionId, scope.cwd, path])
 
   const treeOpen = treeOpenOf(tab)
   /** Persist the panel flag on the tab (survives reloads with the layout). */
@@ -345,6 +385,7 @@ export function EditorHost(props: {
             toolbar: 'host',
             onToolbarState,
             onToolbarControls,
+            onSavedContent,
           })}
         </div>
         {treeOpen && (
@@ -369,6 +410,7 @@ export function EditorHost(props: {
               onOpenFileSide={openFileSide}
               onReferenceFile={onReferenceFile}
               onMutateExpanded={onMutateExpanded}
+              revealedPath={revealedPathOf(tab)}
             />
           </div>
         )}

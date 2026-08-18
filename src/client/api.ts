@@ -161,6 +161,22 @@ export const api = {
   /** Delete a file or directory (recursive for directories). */
   fsDelete: (scope: SessionScope, path: string) =>
     call<{ ok: true }>('fs.delete', scopePayload(scope, { path })),
+  /** Upload raw bytes to one path (POST /sidebar/file) — the markdown editor's
+   *  image paste. The body is the file content (no base64/JSON inflation); the
+   *  target path travels in the query. Bounded by the host's mediaLimit. */
+  uploadFile: async (scope: SessionScope, path: string, body: Blob): Promise<void> => {
+    const params = new URLSearchParams({ sessionId: scope.sessionId, path })
+    if (scope.cwd !== undefined && scope.cwd !== '') params.set('cwd', scope.cwd)
+    let response: Response
+    try {
+      response = await fetch(`/sidebar/file?${params.toString()}`, { method: 'POST', body })
+    } catch (error) {
+      throw new SidebarApiError('network', error instanceof Error ? error.message : String(error))
+    }
+    if (response.ok) return
+    const parsed: { error?: { code?: string; message?: string } } | null = await response.json().catch(() => null)
+    throw new SidebarApiError(parsed?.error?.code ?? 'http', parsed?.error?.message ?? `HTTP ${response.status}`)
+  },
   gitStatus: (scope: SessionScope, signal?: AbortSignal) =>
     call<GitStatusResult>('git.status', scopePayload(scope, {}), signal),
   gitDiff: (scope: SessionScope, path: string | undefined, staged: boolean, signal?: AbortSignal) =>
