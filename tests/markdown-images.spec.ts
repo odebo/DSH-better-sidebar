@@ -64,4 +64,23 @@ describe('rewriteMarkdownImages', () => {
     expect(rewriteMarkdownImages('![logo][l]\n\n[l]: https://example.com/logo.png', '/docs/guide.md', media))
       .toBe('![logo][l]\n\n[l]: https://example.com/logo.png')
   })
+
+  it('never rewrites image syntax inside inline code spans', () => {
+    expect(rewriteMarkdownImages('`![x](a.png)`', '/docs/guide.md', media))
+      .toBe('`![x](a.png)`')
+    // Double-backtick span and a real image right next to a code sample.
+    expect(rewriteMarkdownImages('``![x](a.png)`` and ![y](b.png)', '/docs/guide.md', media))
+      .toBe('``![x](a.png)`` and ![y](media:/docs/b.png)')
+  })
+
+  it('never rewrites image syntax inside fenced code blocks', () => {
+    expect(rewriteMarkdownImages('```md\n![x](a.png)\n```', '/docs/guide.md', media))
+      .toBe('```md\n![x](a.png)\n```')
+    // A 4-backtick fence with a 3-backtick inner fence stays intact.
+    expect(rewriteMarkdownImages('````\n```\n![x](a.png)\n```\n````', '/docs/guide.md', media))
+      .toBe('````\n```\n![x](a.png)\n```\n````')
+    // A real image AFTER a fenced block still rewrites.
+    expect(rewriteMarkdownImages('```\n![x](a.png)\n```\n\n![y](b.png)', '/docs/guide.md', media))
+      .toBe('```\n![x](a.png)\n```\n\n![y](media:/docs/b.png)')
+  })
 })

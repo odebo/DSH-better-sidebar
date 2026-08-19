@@ -32,6 +32,31 @@ const IMAGE_REF_RE = /!\[([^\]]*)\](?:[ \t]*\[([^\]]*)\])?(?!\()/g
 /** Reference definition `[id]: url` (≤3-space indent, optional trailing title). */
 const REF_DEFINITION_RE = /^[ \t]{0,3}\[([^\]]+)\]:[ \t]*(<[^>]+>|[^\s]+)([ \t].*)?$/gm
 
+/** Code regions that must never be image-rewritten: fenced blocks (a ``` / ~~~
+ *  opener and its SAME-length closer, via backreference) and inline code
+ *  spans (a backtick run with no newline inside). A `![x](a.png)` inside one
+ *  of these is sample code, not an image. */
+const CODE_MASK_RE = /(`{3,}|~{3,})[\s\S]*?\1|`+[^`\n]*`+/g
+
+/** Mask code regions with NUL-delimited placeholders so the rewrite pass skips
+ *  them; `restore` puts each original back verbatim (split/join, not replace,
+ *  so `$`-sequences in the original never act as replacement tokens). */
+function maskCode(source: string): { masked: string; restore: (text: string) => string } {
+  const parts: string[] = []
+  const masked = source.replace(CODE_MASK_RE, (whole) => {
+    parts.push(whole)
+    return `\u0000dshimg${parts.length - 1}\u0000`
+  })
+  const restore = (text: string): string => {
+    let out = text
+    for (let i = parts.length - 1; i >= 0; i--) {
+      out = out.split(`\u0000dshimg${i}\u0000`).join(parts[i])
+    }
+    return out
+  }
+  return { masked, restore }
+}
+
 /**
  * Resolve an absolute path into its normal form: separators become `/`, and
  * `.` / `..` segments collapse (a `..` above the root is clamped, mirroring
@@ -105,11 +130,15 @@ export function rewriteMarkdownImages(
   const baseDir = parentOf(filePath)
   const rewrite = (raw: string): string => resolveDestination(baseDir, raw, toMediaUrl)
 
+  // Run every pass on a code-masked copy so sample code (inline code spans and
+  // fenced blocks) keeps its literal `![x](a.png)` text; restore afterwards.
+  const { masked, restore } = maskCode(source)
+
   // Reference ids actually used by an IMAGE reference — a definition shared
   // with a link still resolves to the image, but a link-only definition must
   // never be redirected to the media route.
   const imageRefIds = new Set<string>()
-  for (const match of source.matchAll(IMAGE_REF_RE)) {
+  for (const match of masked.matchAll(IMAGE_REF_RE)) {
     const alt = match[1]
     const explicit = match[2]
     if (alt === undefined) continue
@@ -117,14 +146,16 @@ export function rewriteMarkdownImages(
     imageRefIds.add(id.trim().toLowerCase())
   }
 
-  const inlineRewritten = source.replace(INLINE_IMAGE_RE, (whole, alt, url) => {
+  const inlineRewritten = masked.replace(INLINE_IMAGE_RE, (whole, alt, url) => {
     const next = rewrite(url)
     return next === url ? whole : `![${alt}](${next})`
   })
 
-  return inlineRewritten.replace(REF_DEFINITION_RE, (whole, id, url, title) => {
+  const rewritten = inlineRewritten.replace(REF_DEFINITION_RE, (whole, id, url, title) => {
     if (!imageRefIds.has(id.trim().toLowerCase())) return whole
     const next = rewrite(url)
     return next === url ? whole : `[${id}]: ${next}${title ?? ''}`
   })
+
+  return restore(rewritten)
 }
