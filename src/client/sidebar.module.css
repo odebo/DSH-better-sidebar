@@ -719,13 +719,13 @@
   box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary);
 }
 
-/* The file revealed by a tab double-click: a persistent active-surface fill +
-   brand ring so the located row reads at a glance (the same "selected" fill
-   the native row list uses). */
+/* The file revealed by a tab double-click: a quiet active-surface fill plus a
+   2px brand accent on the LEFT edge — reads as "located" at a glance without
+   the boxy full ring the drag-drop target uses. */
 .explorerRevealed,
 .explorerRevealed:hover {
   background: var(--dsw-alias-interactive-bg-active);
-  box-shadow: inset 0 0 0 1px var(--dsw-alias-brand-primary);
+  box-shadow: inset 2px 0 0 var(--dsw-alias-brand-primary);
 }
 
 .explorerDir {
