@@ -792,6 +792,29 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* The root row's "up" control: navigates to the parent directory (past the
+   workspace). Always visible while a parent exists, unlike the hover-revealed
+   @-reference button. */
+.explorerUp {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.explorerUp:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
 /* A symlink whose target is missing: error ink on the name (the row stays
    clickable — the editor surfaces the read failure). */
 .explorerBroken .explorerName {
@@ -2365,6 +2388,7 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
 .paneCard:focus-visible,
 .explorerRow:focus-visible,
 .explorerRef:focus-visible,
+.explorerUp:focus-visible,
 .gitRowMain:focus-visible,
 .gitLink:focus-visible,
 .gitCommitButton:focus-visible,

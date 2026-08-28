@@ -24,9 +24,9 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  Button, IconCodeOutline16, IconCopyOutline16, IconDownloadOutline16, IconEditOutline16, IconFolderClose16,
-  IconFolderOpen16, IconFolderOpenOutline16, IconLinkOutline16, IconPlusOutline16, IconRightUpOutline16,
-  IconTrashOutline16, Input, Menu, Modal, writeClipboard,
+  Button, IconChevronUpOutline14, IconCodeOutline16, IconCopyOutline16, IconDownloadOutline16, IconEditOutline16,
+  IconFolderClose16, IconFolderOpen16, IconFolderOpenOutline16, IconLinkOutline16, IconPlusOutline16,
+  IconRightUpOutline16, IconTrashOutline16, Input, Menu, Modal, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { api, downloadUrl, type FsEntry } from './api.ts'
 import { parentOf, relativeTo } from './paths.ts'
@@ -103,6 +103,11 @@ export function FileTree(props: {
     onMutateExpanded, revealedPath,
   } = props
   const [data, setData] = useState<Record<string, LevelData>>({})
+  /** The directory currently shown at the tree root (null = the session cwd).
+   *  A non-null value means the user navigated "up" past the workspace; it is
+   *  a per-session in-memory view that resets to the cwd on session switch. */
+  const [rootOverride, setRootOverride] = useState<string | null>(null)
+  const root = rootOverride ?? cwd
   const dataRef = useRef(data)
   /** The revealed file's row — scrolled into view once it renders (levels load
    *  lazily, so the row may appear a tick after the reveal request). */
@@ -152,14 +157,22 @@ export function FileTree(props: {
     setData({})
   }, [refreshTick])
 
+  // Reset the "up" navigation when the session changes so the tree roots back
+  // at the new session's cwd instead of carrying the previous session's view.
+  const lastCwd = useRef(cwd)
+  useEffect(() => {
+    if (lastCwd.current === cwd) return
+    lastCwd.current = cwd
+    setRootOverride(null)
+  }, [cwd])
+
   useEffect(() => {
     // Load the visible set; already-loaded levels (kept in the cache) are
     // not refetched. Only the refresh tick wipes the cache.
-    const root = cwd
     if (root === undefined) return
     loadDir(root)
     for (const dir of expanded) loadDir(dir)
-  }, [cwd, expanded, refreshTick, loadDir])
+  }, [root, expanded, refreshTick, loadDir])
 
   // Scroll the revealed file into view once its row exists. Levels load
   // lazily, so `data` re-running this effect covers the case where the reveal
@@ -455,8 +468,6 @@ export function FileTree(props: {
     if (cwd !== undefined) moveTo(cwd)
   }
 
-  const root = cwd
-
   const renderLevel = (dir: string, depth: number): ReactNode => {
     const level = data[dir]
     if (level === undefined) {
@@ -548,6 +559,11 @@ export function FileTree(props: {
   /** Whether the open context menu is on the workspace root row. */
   const menuIsRoot = rowMenu !== null && rowMenu.isDir && rowMenu.path === cwd
 
+  /** The parent directory the "up" control navigates to; '' (or the root
+   *  itself) means the tree is already at the filesystem root. */
+  const upTarget = root === undefined ? '' : parentOf(root)
+  const canGoUp = upTarget !== '' && upTarget !== root
+
   return (
     <div className={css.explorerBody} onDragOver={onDragOverBody} onDrop={onDropBody}>
       {root === undefined ? (
@@ -561,8 +577,22 @@ export function FileTree(props: {
             onDragOver={(event) => { onDragOverTarget(event, root) }}
             onDrop={(event) => { onDropTarget(event, root) }}
           >
+            {canGoUp && (
+              <button
+                type="button"
+                className={css.explorerUp}
+                aria-label={t('parent')}
+                title={t('parent')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setRootOverride(upTarget)
+                }}
+              >
+                <IconChevronUpOutline14 size={14} />
+              </button>
+            )}
             <IconFolderOpen16 size={14} />
-            <span className={css.explorerName}>{baseName(root)}</span>
+            <span className={css.explorerName}>{baseName(root) || root}</span>
             {copiedPath === root
               ? <span className={css.explorerCopied}>{t('copied')}</span>
               : (
